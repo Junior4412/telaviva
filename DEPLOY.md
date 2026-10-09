@@ -4,7 +4,7 @@ Guia para publicar o projeto no plano gratuito:
 
 | Parte | Plano | Onde roda |
 | --- | --- | --- |
-| Frontend (`apps/web`) | Cloudflare Pages (free) | arquivos estáticos |
+| Frontend (`apps/web`) | Vercel Hobby (free) | arquivos estáticos |
 | Sinalização (`apps/server`) | Render (free) | processo Node persistente |
 
 A mídia (WebRTC) **não passa por nenhum dos dois**: vai de navegador a
@@ -13,14 +13,14 @@ navegador. O Render só troca sinais (SDP/ICE) e mantém a lista de sala.
 > Todos os valores de plano abaixo foram conferidos na documentação oficial em
 > outubro de 2026. Preços e limites mudam — confira sempre em
 > [render.com/docs/free](https://render.com/docs/free) e
-> [Cloudflare Pages limits](https://developers.cloudflare.com/pages/platform/limits/).
+> [Vercel Hobby plan](https://vercel.com/docs/plans/hobby).
 
 ---
 
 ## 1. Pré-requisitos
 
-- Uma conta no [Render](https://render.com) e uma no [Cloudflare](https://dash.cloudflare.com)
-- O repositório publicado no GitHub (Render e Pages conectam por Git)
+- Uma conta no [Render](https://render.com) e uma no [Vercel](https://vercel.com)
+- O repositório publicado no GitHub (Render e Vercel conectam por Git)
 - Node 20.10+ local, para rodar `npm run build` e `npm test` antes de subir
 
 ---
@@ -55,7 +55,7 @@ Em **Settings → Environment variables**:
 
 | Variável | Valor |
 | --- | --- |
-| `ALLOWED_ORIGINS` | `https://SEU-PROJETO.pages.dev` (a URL do frontend) |
+| `ALLOWED_ORIGINS` | `https://SEU-PROJETO.vercel.app` (a URL do frontend) |
 | `NODE_ENV` | `production` (o Render já costuma definir; garanta) |
 | `ICE_URLS` | só se for usar TURN/STUN próprio — ver seção 6 |
 | `ICE_USERNAME` / `ICE_SECRET` | só com TURN — ver seção 6 |
@@ -82,44 +82,60 @@ explícito, em **Settings → Health Check Path** use `/health`.
 
 ---
 
-## 3. Frontend no Cloudflare Pages (free)
+## 3. Frontend no Vercel (free)
 
 ### Criar o projeto
 
-1. Cloudflare Dashboard → **Workers & Pages → Create → Pages → Connect to Git**
-2. Em **Build settings**:
+1. Vercel Dashboard → **Create New → Project**
+2. Importe o repositório `Junior4412/telaviva` (o Vercel detecta o monorepo e
+   oferece os dois apps) → no card **web (Vite)** clique **Import single project**
+3. Confira a configuração:
 
 | Campo | Valor |
 | --- | --- |
-| Framework preset | Vite |
-| Root directory | *(deixe vazio = raiz do repositório)* |
-| Build command | `npm install --include=dev && npm run build --workspace @tela/shared && npm run build --workspace @tela/web` |
-| Output directory | `apps/web/dist` |
+| Project Name | `telaviva` |
+| Root Directory | `apps/web` |
+| Application Preset | Vite |
+| Install Command | `npm install --include=dev` |
+| Build Command | `cd ../.. && npm run build --workspace @tela/shared && npm run build --workspace @tela/web` |
+| Output Directory | `dist` |
 
-> **O root directory precisa ser a raiz.** `@tela/shared` é um workspace local
-> (não existe no npm). Se apontar o Pages só para `apps/web`, a instalação não
-> consegue resolver essa dependência.
+> **Por que `cd ../..` no build?** O Root Directory aponta para `apps/web`,
+> mas os comandos precisam rodar na raiz: `@tela/shared` é um workspace local
+> (não existe no npm) e precisa ser compilado **antes** do `tsc` do web.
+> `Home.tsx` importa valores em tempo de execução (`formatRoomCode`,
+> `ROOM_CODE_LENGTH`) e o tsconfig do web não referencia o shared.
 >
-> **O `shared` precisa ser compilado antes do web.** `Home.tsx` importa valores
-> em tempo de execução (`formatRoomCode`, `ROOM_CODE_LENGTH`) e o tsconfig do
-> web não referencia o shared — então `tsc -b` sozinho não o constrói.
+> **Por que `--include=dev` no install?** Sem ele, `npm install` pode pular os
+> `devDependencies` — onde estão `typescript` e `vite`.
 
 ### Variáveis de ambiente
 
-**Settings → Environment variables**, em *Production* **e** *Preview*:
+**Environment Variables**, em *Production and Preview*:
 
 | Variável | Valor |
 | --- | --- |
 | `VITE_SERVER_URL` | `https://SEU-SERVIDOR.onrender.com` (sem barra no final) |
 
 > `VITE_*` é embutido no JavaScript no momento do build. Trocar esse valor
-> exige um **redeploy** do Pages — não há como mudar em runtime.
+> exige um **redeploy** — não há como mudar em runtime.
 
 ### Roteamento SPA
 
-O arquivo `apps/web/public/_redirects` já está no repositório e faz o Pages
-devolver o `index.html` para qualquer rota (como `/r/ABC234`). Sem ele, abrir
-um link de convite direto pela URL resultaria em 404.
+O arquivo `apps/web/vercel.json` faz o Vercel devolver o `index.html` para
+qualquer rota (como `/r/ABC234`). Sem ele, abrir um link de convite direto pela
+URL resultaria em 404 — os arquivos estáticos (`/assets/*`) continuam sendo
+servidos normalmente porque o Vercel dá precedência ao sistema de arquivos
+antes dos rewrites.
+
+> **O `vercel.json` precisa ficar dentro do Root Directory** (`apps/web`, não
+> na raiz do repositório). Com o Root Directory configurado, o Vercel só lê o
+> arquivo de lá — um `vercel.json` na raiz do repo é ignorado **sem nenhum
+> erro no build**, e o rewrite silenciosamente não aplica. Também precisa
+> estar commitado e fora do `.gitignore`.
+>
+> (O `apps/web/public/_redirects` existe no repo para compatibilidade com
+> Cloudflare Pages/Netlify, mas o Vercel não o usa.)
 
 ---
 
@@ -128,10 +144,10 @@ um link de convite direto pela URL resultaria em 404.
 Os dois lados dependem um do outro (a URL de um é a variável do outro), então:
 
 1. **Deploy do Render primeiro** → anote a URL (`https://xxx.onrender.com`).
-2. **Deploy do Pages** com `VITE_SERVER_URL` já apontando para o Render →
-   anote a URL (`https://xxx.pages.dev`).
-3. **Volte ao Render** e defina `ALLOWED_ORIGINS` com a URL do Pages →
-   Restart.
+2. **Deploy no Vercel** com `VITE_SERVER_URL` já apontando para o Render →
+   anote a URL (`https://xxx.vercel.app`).
+3. **Volte ao Render** e defina `ALLOWED_ORIGINS` com a URL do Vercel →
+   **Save, rebuild, and deploy**.
 4. Faça a verificação da seção 5.
 
 Sem `ALLOWED_ORIGINS` correto, o handshake do Socket.IO é bloqueado por CORS e
@@ -153,7 +169,7 @@ curl https://SEU-SERVIDOR.onrender.com/ice
 
 Teste manual com dois navegadores:
 
-1. Abra `https://SEU-PROJETO.pages.dev` → **Criar sala**
+1. Abra `https://SEU-PROJETO.vercel.app` → **Criar sala**
 2. Copie o link de convite
 3. Abra o link em outra janela/aba anônima (ou outro dispositivo) → **Entrar**
 4. Em um deles: **Compartilhar tela** → escolha uma janela/tela
@@ -219,9 +235,10 @@ metadados).
 | Render — CPU/RAM | 0.1 CPU / 512 MB | sinalização é leve; o gargalo real é o upload dos usuários |
 | Render — horas/mês | 750 por workspace | um serviço sempre ligado consome quase tudo; com sleep, sobra folga |
 | Render — sleep | após 15 min ocioso | cold start ~1 min na primeira visita |
-| Cloudflare Pages — builds | 500/mês, 1 por vez | ~16 builds/dia, folga enorme |
-| Cloudflare Pages — arquivos | 20.000 por site | temos < 20 |
-| Cloudflare Pages — banda | ilimitada | sem impacto |
+| Vercel — banda | 100 GB/mês | estático leve (JS ~70 kB); folga enorme |
+| Vercel — deploys | 100/dia, 1 simultâneo | ~16 builds/dia no ritmo atual |
+| Vercel — build | 45 min por deploy | nosso build leva < 1 min |
+| Vercel — uso | plano Hobby é **não-comercial** | uso comercial exige Pro (US$ 20/mês) |
 
 **Do produto (independentemente de plano):**
 
@@ -231,7 +248,10 @@ metadados).
   malha: quem compartilha sobe `N-1` streams. Em salas grandes a qualidade
   cai conforme o upload de quem compartilha — o congestion control do WebRTC
   degrada antes de quebrar.
-- **Sem áudio no MVP:** apenas vídeo da tela.
+- **Áudio opcional, e depende da origem:** desligado por padrão ("Compartilhar
+  áudio"). Só há som quando o navegador captura (típico: áudio de aba no
+  Chrome/Firefox) e a origem escolhida tem áudio; quem assiste ativa o som pelo
+  botão sobre o vídeo.
 - **Sem TURN por padrão:** veja a seção 6.
 - **O sinalizador vê metadados:** quem está em qual sala, IPs e SDP/ICE. Não
   fazemos alegação de criptografia ponta a ponta além do DTLS-SRTP da mídia.

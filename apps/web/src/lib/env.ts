@@ -10,8 +10,7 @@ const rawServerUrl = import.meta.env.VITE_SERVER_URL as string | undefined;
 
 /**
  * Em desenvolvimento o Vite roda na porta 5173 e o servidor em 3001. Em
- * produção a URL vem de `VITE_SERVER_URL` definida no build do Cloudflare
- * Pages.
+ * produção a URL vem de `VITE_SERVER_URL` definida no build do Vercel.
  */
 export const SERVER_URL =
   rawServerUrl && rawServerUrl.trim().length > 0

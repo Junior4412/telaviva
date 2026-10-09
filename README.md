@@ -124,7 +124,11 @@ Resumo:
 - **Sem limite de participantes por sala** (decisão de produto). Não há teto
   imposto pelo servidor; a usabilidade prática em malha costuma cair bem antes
   disso. Proteções contra abuso continuam valendo pelo rate limit por IP.
-- **Sem áudio no MVP:** apenas vídeo da tela.
+- **Áudio opcional, e depende da origem:** desligado por padrão — marque
+  "Compartilhar áudio" antes de iniciar. O áudio é capturado só quando o
+  navegador oferece (típico: áudio de aba no Chrome/Firefox) e a origem escolhida
+  tem som; janela de programa/monitor pode não ter áudio algum. Quem assiste
+  ativa o som pelo botão sobre o vídeo.
 - **Sem servidor TURN por padrão:** em redes restritas (NAT simétro,
   corporativo, alguns hotspots) a conexão direta pode falhar. Veja o guia de
   implantação para configurar TURN.
@@ -133,4 +137,4 @@ Resumo:
 
 ## Implantação
 
-Guia completo (Render + Cloudflare Pages no plano gratuito): [DEPLOY.md](./DEPLOY.md)
+Guia completo (Render + Vercel no plano gratuito): [DEPLOY.md](./DEPLOY.md)

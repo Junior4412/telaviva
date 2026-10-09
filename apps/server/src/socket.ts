@@ -23,7 +23,7 @@ import { RoomManager, toParticipant, type JoinFailureReason } from "./roomManage
 export type TelaServer = Server<ClientToServerEvents, ServerToClientEvents>;
 export type TelaSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 
-/** Extrai o IP real do cliente, considerando proxies (Cloudflare/Render). */
+/** Extrai o IP real do cliente, considerando o proxy do Render. */
 function resolveClientIp(socket: TelaSocket): string {
   const headers = socket.handshake.headers;
   const forwarded = headers["x-forwarded-for"];

@@ -19,7 +19,21 @@ interface ScreenShareState {
   isSharing: boolean;
   localStream: MediaStream | null;
   error: string | null;
+  /**
+   * `true` quando existe uma trilha de áudio ao vivo sendo transmitida. Pode
+   * ser `false` mesmo com o compartilhamento de áudio solicitado — nem toda
+   * origem (janela/monitor) oferece áudio.
+   */
+  hasAudio: boolean;
 }
+
+/** Retorno do hook: estado puro + ações de iniciar/encerrar. */
+type ScreenShareApi = ScreenShareState & {
+  start: (
+    withAudio?: boolean,
+  ) => Promise<{ started: boolean; hasAudio: boolean } | null>;
+  stop: () => void;
+};
 
 /**
  * Hook que controla o compartilhamento de tela do próprio usuário.
@@ -28,14 +42,12 @@ interface ScreenShareState {
  * usuário clica em "Parar compartilhamento" na barra do navegador, e limpa os
  * tracks para liberar o indicador de gravação do sistema.
  */
-function useScreenShare(): ScreenShareState & {
-  start: () => Promise<void>;
-  stop: () => void;
-} {
+function useScreenShare(): ScreenShareApi {
   const [state, setState] = useState<ScreenShareState>({
     isSharing: false,
     localStream: null,
     error: null,
+    hasAudio: false,
   });
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -45,43 +57,54 @@ function useScreenShare(): ScreenShareState & {
       for (const track of stream.getTracks()) track.stop();
       streamRef.current = null;
     }
-    setState({ isSharing: false, localStream: null, error: null });
+    setState({ isSharing: false, localStream: null, error: null, hasAudio: false });
   }, []);
 
-  const start = useCallback(async () => {
-    // Navegadores móveis não oferecem getDisplayMedia.
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      setState((current) => ({
-        ...current,
-        error:
-          "Seu navegador não permite compartilhar a tela. Tente no Chrome ou Edge num computador.",
-      }));
-      return;
-    }
+  const start = useCallback(
+    async (
+      withAudio = false,
+    ): Promise<{ started: boolean; hasAudio: boolean } | null> => {
+      // Navegadores móveis não oferecem getDisplayMedia.
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+        setState((current) => ({
+          ...current,
+          error:
+            "Seu navegador não permite compartilhar a tela. Tente no Chrome ou Edge num computador.",
+        }));
+        return null;
+      }
 
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 30, max: 60 } },
-        audio: false,
-      });
+      try {
+        // `audio: true` pede áudio ao seletor do navegador (áudio de aba em
+        // Chrome/Firefox). Nem toda origem oferece — daí a checagem abaixo.
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: { ideal: 30, max: 60 } },
+          audio: withAudio,
+        });
 
-      streamRef.current = stream;
-      setState({ isSharing: true, localStream: stream, error: null });
+        streamRef.current = stream;
+        const hasAudio = stream.getAudioTracks().length > 0;
+        setState({ isSharing: true, localStream: stream, error: null, hasAudio });
 
-      // O usuário pode parar pela barra do próprio navegador.
-      const [track] = stream.getVideoTracks();
-      track?.addEventListener("ended", stop);
-    } catch (caught) {
-      const name = caught instanceof Error ? caught.name : "";
-      const message =
-        name === "NotAllowedError"
-          ? "Você cancelou o compartilhamento da tela."
-          : name === "NotFoundError"
-            ? "Nenhuma janela ou tela foi encontrada."
-            : "Não foi possível iniciar o compartilhamento.";
-      setState((current) => ({ ...current, error: message }));
-    }
-  }, [stop]);
+        // O usuário pode parar pela barra do próprio navegador.
+        const [track] = stream.getVideoTracks();
+        track?.addEventListener("ended", stop);
+
+        return { started: true, hasAudio };
+      } catch (caught) {
+        const name = caught instanceof Error ? caught.name : "";
+        const message =
+          name === "NotAllowedError"
+            ? "Você cancelou o compartilhamento da tela."
+            : name === "NotFoundError"
+              ? "Nenhuma janela ou tela foi encontrada."
+              : "Não foi possível iniciar o compartilhamento.";
+        setState((current) => ({ ...current, error: message }));
+        return null;
+      }
+    },
+    [stop],
+  );
 
   // Ao desmontar, garante que nada fique transmitindo.
   useEffect(() => stop, [stop]);
@@ -145,6 +168,21 @@ export function RoomPage() {
   const [submitting, setSubmitting] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  /** Checkbox "Compartilhar áudio" — desligado por padrão (é opcional). */
+  const [shareWithAudio, setShareWithAudio] = useState(false);
+  /** Palco em tela cheia (seguindo o elemento que a API promoveu). */
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  // Mantém o estado de tela cheia em sincronia — inclusive quando o usuário
+  // sai pelo ESC do sistema.
+  useEffect(() => {
+    const handleChange = (): void => {
+      setIsFullscreen(document.fullscreenElement === stageRef.current);
+    };
+    document.addEventListener("fullscreenchange", handleChange);
+    return () => document.removeEventListener("fullscreenchange", handleChange);
+  }, []);
 
   const joined = state.status === "joined";
   const participants = state.participants;
@@ -203,6 +241,42 @@ export function RoomPage() {
     leaveRoom();
     navigate("/");
   }, [leaveRoom, navigate, screen]);
+
+  /**
+   * Inicia o compartilhamento respeitando o checkbox de áudio. Se o usuário
+   * pediu áudio e a origem escolhida não ofereceu (ex.: janela de programa,
+   * ou o seletor sem "compartilhar som"), avisamos com um toast informativo
+   * em vez de falhar — o vídeo continua normalmente.
+   */
+  const handleStartShare = useCallback(async () => {
+    const result = await screen.start(shareWithAudio);
+    if (result?.started && shareWithAudio && !result.hasAudio) {
+      toast.push(
+        "Esta origem não tem áudio — a tela foi compartilhada apenas com vídeo.",
+        "info",
+      );
+    }
+  }, [screen, shareWithAudio, toast]);
+
+  /** Entra ou sai da tela cheia do palco de vídeo. */
+  const toggleFullscreen = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+
+    if (typeof stage.requestFullscreen !== "function") {
+      toast.push("Seu navegador não suporta tela cheia.", "error");
+      return;
+    }
+
+    void stage.requestFullscreen().catch(() => {
+      toast.push("Não foi possível ativar a tela cheia.", "error");
+    });
+  }, [toast]);
 
   // Sai da sala ao desmontar de verdade.
   //
@@ -324,10 +398,21 @@ export function RoomPage() {
       <main className="flex flex-1 flex-col lg:flex-row">
         {/* Palco de vídeo — prioridade máxima */}
         <section className="relative flex flex-1 items-center justify-center p-4 sm:p-6">
-          <div className="relative flex aspect-video w-full max-w-5xl items-center justify-center overflow-hidden rounded-2xl border border-base-800 bg-base-900">
+          <div
+            ref={stageRef}
+            className={[
+              "relative flex items-center justify-center overflow-hidden bg-base-900",
+              // Em tela cheia o palco ocupa a tela inteira sem borda/raio;
+              // fora dela mantém o formato de vídeo do layout.
+              isFullscreen
+                ? "size-full"
+                : "aspect-video w-full max-w-5xl rounded-2xl border border-base-800",
+            ].join(" ")}
+          >
             {stageContent({
               isSharing: screen.isSharing,
               localStream: screen.localStream,
+              hasAudio: screen.hasAudio,
               remoteStreams,
               participantNames,
               joined,
@@ -344,19 +429,77 @@ export function RoomPage() {
                 {screen.error}
               </div>
             )}
+
+            {/* Tela cheia — só aparece quando há vídeo no palco */}
+            {joined &&
+              (screen.isSharing || Object.keys(remoteStreams).length > 0) && (
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  aria-label={isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+                  title={
+                    isFullscreen ? "Sair da tela cheia (Esc)" : "Tela cheia"
+                  }
+                  className="absolute right-3 top-3 z-10 rounded-lg border border-white/10 bg-base-950/70 p-2 text-ink-200 backdrop-blur transition-colors hover:bg-base-800 hover:text-ink-50"
+                >
+                  {isFullscreen ? (
+                    /* Sai da tela cheia: setas apontando para o centro */
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="size-4"
+                      aria-hidden="true"
+                    >
+                      <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+                    </svg>
+                  ) : (
+                    /* Tela cheia: setas apontando para fora */
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="size-4"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+                    </svg>
+                  )}
+                </button>
+              )}
           </div>
 
           {/* Controles discretos */}
           {joined && (
-            <div className="mt-4 flex items-center justify-center gap-3">
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
               {screen.isSharing ? (
                 <Button variant="danger" onClick={screen.stop}>
                   Encerrar compartilhamento
                 </Button>
               ) : (
-                <Button onClick={() => void screen.start()}>
-                  Compartilhar minha tela
-                </Button>
+                <>
+                  {/* Áudio é opcional e desligado por padrão. */}
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-300 select-none">
+                    <input
+                      type="checkbox"
+                      checked={shareWithAudio}
+                      onChange={(event) =>
+                        setShareWithAudio(event.target.checked)
+                      }
+                      className="size-4 rounded border-base-600 bg-base-900 accent-accent-500"
+                    />
+                    Compartilhar áudio
+                  </label>
+                  <Button onClick={() => void handleStartShare()}>
+                    Compartilhar minha tela
+                  </Button>
+                </>
               )}
               <Button variant="secondary" onClick={handleCopyInvite}>
                 {copied ? "Copiado ✓" : "Copiar convite"}
@@ -422,6 +565,7 @@ export function RoomPage() {
 function stageContent({
   isSharing,
   localStream,
+  hasAudio,
   remoteStreams,
   participantNames,
   joined,
@@ -430,6 +574,7 @@ function stageContent({
 }: {
   isSharing: boolean;
   localStream: MediaStream | null;
+  hasAudio: boolean;
   remoteStreams: Record<string, MediaStream>;
   participantNames: Map<string, string>;
   joined: boolean;
@@ -459,7 +604,7 @@ function stageContent({
 
         {isSharing && localStream && (
           <div className="relative overflow-hidden rounded-xl bg-black">
-            <LocalVideo stream={localStream} compact />
+            <LocalVideo stream={localStream} compact withAudio={hasAudio} />
           </div>
         )}
       </div>
@@ -468,7 +613,7 @@ function stageContent({
 
   // Ninguém remoto transmitindo, mas você está: prévia em destaque.
   if (isSharing && localStream) {
-    return <LocalVideo stream={localStream} />;
+    return <LocalVideo stream={localStream} withAudio={hasAudio} />;
   }
 
   // Nada transmitindo ainda.
@@ -485,9 +630,12 @@ function stageContent({
 function LocalVideo({
   stream,
   compact = false,
+  withAudio = false,
 }: {
   stream: MediaStream;
   compact?: boolean;
+  /** `true` quando há trilha de áudio sendo transmitida junto. */
+  withAudio?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -496,7 +644,7 @@ function LocalVideo({
     if (!element) return;
     element.srcObject = stream;
     // `play()` pode rejeitar se o autoplay for bloqueado; ignoramos pois o
-    // vídeo local é um preview e não precisa de som.
+    // vídeo local é um preview e nunca toca o próprio áudio (eco).
     void element.play().catch(() => undefined);
   }, [stream]);
 
@@ -517,6 +665,7 @@ function LocalVideo({
         ].join(" ")}
       >
         Você está compartilhando
+        {withAudio && " · com áudio"}
       </span>
     </>
   );

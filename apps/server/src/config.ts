@@ -44,7 +44,7 @@ export const config = {
   /**
    * Origens permitidas no CORS e no handshake do Socket.IO.
    *
-   * Em produção isso deve ser a URL do Cloudflare Pages. Uma origem vazia ou
+   * Em produção isso deve ser a URL do frontend no Vercel. Uma origem vazia ou
    * "*" aqui abriria o servidor para qualquer site se conectar.
    */
   allowedOrigins: readList("ALLOWED_ORIGINS", DEV_ORIGINS),
