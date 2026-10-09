@@ -13,6 +13,16 @@ import { RemoteVideo } from "../components/RemoteVideo";
 import { usePeers } from "../hooks/usePeers";
 import { useRoom } from "../state/RoomContext";
 import { useToast } from "../components/Toast";
+import {
+  DEFAULT_PREFS,
+  FPS_OPTIONS,
+  QUALITY_OPTIONS,
+  loadTransmissionPrefs,
+  qualityOption,
+  saveTransmissionPrefs,
+  videoConstraintsFor,
+  type TransmissionPrefs,
+} from "../lib/transmission";
 
 /** Estado da doação de tela, isolado em um hook para a página da sala. */
 interface ScreenShareState {
@@ -31,6 +41,7 @@ interface ScreenShareState {
 type ScreenShareApi = ScreenShareState & {
   start: (
     withAudio?: boolean,
+    prefs?: TransmissionPrefs,
   ) => Promise<{ started: boolean; hasAudio: boolean } | null>;
   stop: () => void;
 };
@@ -63,6 +74,7 @@ function useScreenShare(): ScreenShareApi {
   const start = useCallback(
     async (
       withAudio = false,
+      prefs: TransmissionPrefs = DEFAULT_PREFS,
     ): Promise<{ started: boolean; hasAudio: boolean } | null> => {
       // Navegadores móveis não oferecem getDisplayMedia.
       if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
@@ -77,8 +89,9 @@ function useScreenShare(): ScreenShareApi {
       try {
         // `audio: true` pede áudio ao seletor do navegador (áudio de aba em
         // Chrome/Firefox). Nem toda origem oferece — daí a checagem abaixo.
+        // FPS e qualidade (resolução) vêm das escolhas do usuário.
         const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { frameRate: { ideal: 30, max: 60 } },
+          video: videoConstraintsFor(prefs),
           audio: withAudio,
         });
 
@@ -170,6 +183,25 @@ export function RoomPage() {
   const [copied, setCopied] = useState(false);
   /** Checkbox "Compartilhar áudio" — desligado por padrão (é opcional). */
   const [shareWithAudio, setShareWithAudio] = useState(false);
+  /**
+   * FPS e qualidade escolhidos pelo usuário (persistidos no navegador).
+   * A captura só aceita restrições no início do compartilhamento.
+   */
+  const [transmission, setTransmission] = useState<TransmissionPrefs>(() =>
+    loadTransmissionPrefs(),
+  );
+
+  /** Atualiza uma preferência de transmissão e a persiste. */
+  const updateTransmission = useCallback(
+    (patch: Partial<TransmissionPrefs>) => {
+      setTransmission((current) => {
+        const next = { ...current, ...patch };
+        saveTransmissionPrefs(next);
+        return next;
+      });
+    },
+    [],
+  );
   /** Palco em tela cheia (seguindo o elemento que a API promoveu). */
   const [isFullscreen, setIsFullscreen] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -194,6 +226,8 @@ export function RoomPage() {
     participants,
     localStream: screen.localStream,
     active: joined,
+    // Teto de bitrate do preset de qualidade (pode mudar em transmissão).
+    videoBitrateKbps: qualityOption(transmission.quality).bitrateKbps,
   });
 
   /** Entra na sala com o nome/senha informados. */
@@ -249,14 +283,14 @@ export function RoomPage() {
    * em vez de falhar — o vídeo continua normalmente.
    */
   const handleStartShare = useCallback(async () => {
-    const result = await screen.start(shareWithAudio);
+    const result = await screen.start(shareWithAudio, transmission);
     if (result?.started && shareWithAudio && !result.hasAudio) {
       toast.push(
         "Esta origem não tem áudio — a tela foi compartilhada apenas com vídeo.",
         "info",
       );
     }
-  }, [screen, shareWithAudio, toast]);
+  }, [screen, shareWithAudio, toast, transmission]);
 
   /** Entra ou sai da tela cheia do palco de vídeo. */
   const toggleFullscreen = useCallback(() => {
@@ -491,6 +525,52 @@ export function RoomPage() {
                     />
                     Compartilhar áudio
                   </label>
+
+                  {/* FPS da captura — aplicado ao iniciar o compartilhamento. */}
+                  <label className="flex items-center gap-2 text-sm text-ink-300 select-none">
+                    FPS
+                    <select
+                      value={transmission.fps}
+                      onChange={(event) =>
+                        updateTransmission({ fps: Number(event.target.value) })
+                      }
+                      aria-label="FPS da transmissão"
+                      className="rounded-lg border border-base-700/70 bg-base-850 px-2 py-1 text-ink-100 transition-colors hover:border-accent-500/50"
+                    >
+                      {FPS_OPTIONS.map((fps) => (
+                        <option key={fps} value={fps}>
+                          {fps}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {/* Qualidade: resolução ideal + teto de bitrate. */}
+                  <label className="flex items-center gap-2 text-sm text-ink-300 select-none">
+                    Qualidade
+                    <select
+                      value={transmission.quality}
+                      onChange={(event) =>
+                        updateTransmission({
+                          quality: event.target
+                            .value as TransmissionPrefs["quality"],
+                        })
+                      }
+                      aria-label="Qualidade da transmissão"
+                      className="rounded-lg border border-base-700/70 bg-base-850 px-2 py-1 text-ink-100 transition-colors hover:border-accent-500/50"
+                    >
+                      {QUALITY_OPTIONS.map((option) => (
+                        <option
+                          key={option.id}
+                          value={option.id}
+                          className="bg-base-900 text-ink-100"
+                        >
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
                   <Button onClick={() => void handleStartShare()}>
                     Compartilhar minha tela
                   </Button>

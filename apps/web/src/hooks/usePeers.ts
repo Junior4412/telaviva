@@ -29,6 +29,11 @@ interface UsePeersInput {
   localStream: MediaStream | null;
   /** Só gerencia conexões quando `true` (dentro de uma sala). */
   active: boolean;
+  /**
+   * Teto de bitrate de vídeo em kbps (preset de qualidade do usuário).
+   * `null` não aplica limite. Pode mudar durante a transmissão.
+   */
+  videoBitrateKbps: number | null;
 }
 
 /** Converte a descrição local do WebRTC no formato do protocolo. */
@@ -51,7 +56,13 @@ function toSdpPayload(description: RTCSessionDescription | null): SdpPayload | n
  * conflito é resolvido de forma determinística — o lado "educado" cede. Isso
  * é o que torna viável ter vários transmissores simultâneos na mesma sala.
  */
-export function usePeers({ selfId, participants, localStream, active }: UsePeersInput) {
+export function usePeers({
+  selfId,
+  participants,
+  localStream,
+  active,
+  videoBitrateKbps,
+}: UsePeersInput) {
   /** Streams remotos por id de par, expostos para a UI. */
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
 
@@ -72,6 +83,7 @@ export function usePeers({ selfId, participants, localStream, active }: UsePeers
    * mas `muted`, sem vídeo e sem áudio). O padrão da spec é enfileirar.
    */
   const pendingIceRef = useRef(new Map<string, RTCIceCandidateInit[]>());
+  const videoBitrateKbpsRef = useRef<number | null>(videoBitrateKbps);
 
   /** Aplica os candidatos pendentes de um par quando já há descrição remota. */
   const flushIce = useCallback((peerId: string) => {
@@ -92,6 +104,29 @@ export function usePeers({ selfId, participants, localStream, active }: UsePeers
   // Mantém as refs em sincronia com as props a cada render.
   localStreamRef.current = localStream;
   selfIdRef.current = selfId;
+  videoBitrateKbpsRef.current = videoBitrateKbps;
+
+  /**
+   * Aplica o teto de bitrate do preset de qualidade nos senders de vídeo.
+   * `setParameters()` não renegocia a conexão — dá pra mudar em transmissão.
+   */
+  const applyVideoBitrate = useCallback((state: PeerState) => {
+    const kbps = videoBitrateKbpsRef.current;
+    for (const sender of state.pc.getSenders()) {
+      if (!sender.track || sender.track.kind !== "video") continue;
+      try {
+        const params = sender.getParameters();
+        // Sem encoding ainda (pré-negociação em alguns navegadores): nada a
+        // fazer — `syncTracks` reexecuta após a renegociação e reaplica.
+        const encoding = params.encodings?.[0];
+        if (!encoding) continue;
+        encoding.maxBitrate = kbps ? kbps * 1000 : undefined;
+        void sender.setParameters(params).catch(() => undefined);
+      } catch {
+        // Navegador sem suporte a setParameters: segue sem limite.
+      }
+    }
+  }, []);
 
   /** Busca os servidores ICE uma única vez e reaproveita a promessa. */
   const getIceServers = useCallback(() => {
@@ -134,7 +169,10 @@ export function usePeers({ selfId, participants, localStream, active }: UsePeers
       const alreadySent = senders.some((sender) => sender.track === track);
       if (!alreadySent) pc.addTrack(track, local);
     }
-  }, []);
+
+    // Garante o teto de bitrate já nas faixas recém-adicionadas.
+    applyVideoBitrate(state);
+  }, [applyVideoBitrate]);
 
   /** Descarta um par e seu stream remoto. */
   const closePeer = useCallback(
@@ -343,6 +381,14 @@ export function usePeers({ selfId, participants, localStream, active }: UsePeers
       syncTracks(state);
     }
   }, [localStream, syncTracks]);
+
+  // Mudou o preset de qualidade: reexecuta o teto de bitrate nos senders
+  // existentes — setParameters não precisa de renegociação.
+  useEffect(() => {
+    for (const state of peersRef.current.values()) {
+      applyVideoBitrate(state);
+    }
+  }, [applyVideoBitrate, videoBitrateKbps]);
 
   // Ao sair da sala ou desmontar, encerra todas as conexões.
   useEffect(() => {
