@@ -1,0 +1,25 @@
+{
+  "name": "telaviva",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Compartilhamento de tela em tempo real pelo navegador - WebRTC + Socket.IO.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "scripts": {
+    "dev": "npm run build --workspace @tela/shared && concurrently -n shared,server,web -c \"magenta,cyan,green\" \"npm:dev:shared\" \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:shared": "npm run dev --workspace @tela/shared",
+    "dev:server": "npm run dev --workspace @tela/server",
+    "dev:web": "npm run dev --workspace @tela/web",
+    "build": "npm run build --workspace @tela/shared && npm run build --workspace @tela/server && npm run build --workspace @tela/web",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

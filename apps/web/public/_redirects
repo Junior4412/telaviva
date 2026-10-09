@@ -1,0 +1,6 @@
+# Cloudflare Pages: fallback de SPA.
+#
+# Sem isto, abrir (ou recarregar) /r/CODE direto pela URL devolve 404 do
+# Cloudflare, porque não existe arquivo físico correspondente. A regra abaixo
+# devolve o index.html com status 200 e o React Router assume o roteamento.
+/*    /index.html   200

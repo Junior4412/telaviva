@@ -1,0 +1,165 @@
+@import "tailwindcss";
+
+/* Identidade visual da TelaViva: tema escuro com acento verde-água. */
+@theme {
+  --color-base-950: #08090c;
+  --color-base-900: #0d0f14;
+  --color-base-850: #12151c;
+  --color-base-800: #171b24;
+  --color-base-700: #212734;
+  --color-base-600: #2e3646;
+
+  --color-accent-300: #7df7d4;
+  --color-accent-400: #3fe9bd;
+  --color-accent-500: #16d3a4;
+  --color-accent-600: #0ea98a;
+  --color-accent-700: #0b826b;
+
+  --color-ink-100: #f2f5f7;
+  --color-ink-300: #c3cbd6;
+  --color-ink-500: #8b95a5;
+  --color-ink-700: #5b6472;
+
+  --color-danger-400: #ff7a7a;
+  --color-danger-500: #f25555;
+  --color-danger-600: #c93a3a;
+
+  --color-warning-400: #ffcf6b;
+  --color-warning-500: #f2b53f;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --animate-fade-in: fade-in 200ms ease-out;
+  --animate-slide-up: slide-up 240ms ease-out;
+  --animate-pulse-soft: pulse-soft 2s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes pulse-soft {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+:root {
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-base-950);
+    color: var(--color-ink-100);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Evita o "bounce" do iOS ao rolar. */
+    overscroll-behavior-y: none;
+  }
+
+  /* Anel de foco visível e consistente para navegação por teclado. */
+  *:focus-visible {
+    outline: none;
+    --tw-ring-color: color-mix(in oklab, var(--color-accent-400) 70%, transparent);
+    box-shadow:
+      var(--tw-ring-inset, 0 0 0 0) var(--tw-ring-color, transparent),
+      var(--tw-ring-offset-shadow, 0 0 #0000),
+      0 0 0 2px var(--color-base-950),
+      0 0 0 4px var(--tw-ring-color, transparent);
+  }
+
+  /* Remove o spinner nativo dos inputs number. */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+@layer components {
+  /* Cartão de superfície usado na home e nos painéis. */
+  .surface {
+    border-radius: 1rem;
+    border: 1px solid color-mix(in oklab, var(--color-base-700) 70%, transparent);
+    background-color: color-mix(in oklab, var(--color-base-850) 80%, transparent);
+    backdrop-filter: blur(4px);
+  }
+
+  /* Texto auxiliar padrão. */
+  .muted {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--color-ink-500);
+  }
+
+  /* Brilho radial sutil atrás do hero. */
+  .glow-accent {
+    background: radial-gradient(
+      600px circle at 50% 0%,
+      color-mix(in oklab, var(--color-accent-500) 14%, transparent),
+      transparent 65%
+    );
+  }
+
+  /* Grade discreta no fundo da home. */
+  .grid-bg {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, white 3%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, white 3%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 48px 48px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, black, transparent);
+    mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, black, transparent);
+  }
+}
+
+/* Estiliza a barra de rolagem de forma discreta no tema escuro. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2e3646 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #2e3646;
+  border-radius: 9999px;
+}
