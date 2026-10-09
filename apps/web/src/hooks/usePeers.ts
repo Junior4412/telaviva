@@ -60,6 +60,34 @@ export function usePeers({ selfId, participants, localStream, active }: UsePeers
   const localStreamRef = useRef<MediaStream | null>(localStream);
   const selfIdRef = useRef<string | null>(selfId);
   const icePromiseRef = useRef<Promise<IceServerConfig[]> | null>(null);
+  /**
+   * Candidatos ICE recebidos antes de a descrição remota existir.
+   *
+   * Oferta e candidatos viajam no mesmo socket, mas os handlers são
+   * assíncronos e competem: `addIceCandidate` antes de
+   * `setRemoteDescription` rejeita, e candidatos de um par cujo
+   * `ensurePeer` ainda estava buscando os servidores ICE se perdiam em
+   * silêncio. Em redes rápidas o Chrome envia todos os candidatos host
+   * nessa janela — perdê-los derruba a conexão inteira (tracks chegam,
+   * mas `muted`, sem vídeo e sem áudio). O padrão da spec é enfileirar.
+   */
+  const pendingIceRef = useRef(new Map<string, RTCIceCandidateInit[]>());
+
+  /** Aplica os candidatos pendentes de um par quando já há descrição remota. */
+  const flushIce = useCallback((peerId: string) => {
+    const state = peersRef.current.get(peerId);
+    const queue = pendingIceRef.current.get(peerId);
+    if (!state || !queue || queue.length === 0) return;
+    if (!state.pc.remoteDescription) return;
+
+    pendingIceRef.current.delete(peerId);
+    for (const candidate of queue) {
+      void state.pc.addIceCandidate(candidate).catch((error) => {
+        // Candidato inválido ou duplicado não derruba a conexão.
+        console.warn("[webrtc] ice", peerId, error);
+      });
+    }
+  }, []);
 
   // Mantém as refs em sincronia com as props a cada render.
   localStreamRef.current = localStream;
@@ -123,6 +151,7 @@ export function usePeers({ selfId, participants, localStream, active }: UsePeers
       if (remoteStreamsRef.current.delete(peerId)) {
         publishRemote();
       }
+      pendingIceRef.current.delete(peerId);
     },
     [publishRemote],
   );
@@ -238,6 +267,10 @@ export function usePeers({ selfId, participants, localStream, active }: UsePeers
           await pc.setRemoteDescription(payload.sdp);
           state.isSettingRemoteAnswerPending = payload.sdp.type === "answer";
 
+          // Descrição remota aplicada: candidatos que chegaram antes já podem
+          // ser adicionados — é aqui que a fila é drenada.
+          flushIce(payload.from);
+
           if (payload.sdp.type === "offer") {
             await pc.setLocalDescription();
             const sdp = toSdpPayload(pc.localDescription);
@@ -258,6 +291,7 @@ export function usePeers({ selfId, participants, localStream, active }: UsePeers
           if (!state) return;
           state.isSettingRemoteAnswerPending = payload.sdp.type === "answer";
           await state.pc.setRemoteDescription(payload.sdp);
+          flushIce(payload.from);
         } catch (error) {
           console.error("[webrtc] answer", payload.from, error);
         }
@@ -265,19 +299,12 @@ export function usePeers({ selfId, participants, localStream, active }: UsePeers
     };
 
     const handleIce = (payload: { from: string; candidate: IceCandidatePayload }): void => {
-      void (async () => {
-        try {
-          const state = peersRef.current.get(payload.from);
-          if (!state) return;
-          await state.pc.addIceCandidate(payload.candidate as RTCIceCandidateInit);
-        } catch (error) {
-          // Durante um conflito descartado, falhar aqui é esperado e inocente.
-          const state = peersRef.current.get(payload.from);
-          if (!state?.ignoreOffer) {
-            console.warn("[webrtc] ice", payload.from, error);
-          }
-        }
-      })();
+      // Enfileira SEMPRE e tenta drenar: a fila só é aplicada quando o pc já
+      // tem descrição remota; até lá, os candidatos ficam guardados.
+      const queue = pendingIceRef.current.get(payload.from) ?? [];
+      queue.push(payload.candidate as RTCIceCandidateInit);
+      pendingIceRef.current.set(payload.from, queue);
+      flushIce(payload.from);
     };
 
     socket.on("signal:offer", handleOffer);
