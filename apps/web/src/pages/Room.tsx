@@ -400,14 +400,9 @@ export function RoomPage() {
         <section className="relative flex flex-1 items-center justify-center p-4 sm:p-6">
           <div
             ref={stageRef}
-            className={[
-              "relative flex items-center justify-center overflow-hidden bg-base-900",
-              // Em tela cheia o palco ocupa a tela inteira sem borda/raio;
-              // fora dela mantém o formato de vídeo do layout.
-              isFullscreen
-                ? "size-full"
-                : "aspect-video w-full max-w-5xl rounded-2xl border border-base-800",
-            ].join(" ")}
+            /* O preenchimento em tela cheia é resolvido pelo CSS `:fullscreen`
+               (index.css) — imune a dessincronização do estado do React. */
+            className="stage relative flex aspect-video w-full max-w-5xl items-center justify-center overflow-hidden rounded-2xl border border-base-800 bg-base-900"
           >
             {stageContent({
               isSharing: screen.isSharing,

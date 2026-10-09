@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from "react";
 /**
  * Vídeo remoto de um participante que está compartilhando a tela.
  *
- * Começa com `muted` porque a política de autoplay dos navegadores bloqueia
- * vídeo com som antes de interação do usuário. Quando a transmissão tem
- * trilha de áudio, um botão de som aparece sobre o vídeo — e clicar nele é
- * justamente a interação que libera o autoplay com áudio.
+ * Som vem ligado por padrão: quem assiste já clicou para entrar na sala, e
+ * essa interação costuma liberar o autoplay com áudio na política dos
+ * navegadores. Se ainda assim o navegador barrar, caímos para o modo mudo
+ * (o vídeo continua) e tentamos de novo sozinhos na primeira interação —
+ * o botão de som fica disponível o tempo todo, com volume regulável.
  */
 export function RemoteVideo({
   stream,
@@ -17,7 +18,10 @@ export function RemoteVideo({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hasFrames, setHasFrames] = useState(false);
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(100);
+  /** Marca quando o USUÁRIO silenciou de propósito (evita reativar sozinho). */
+  const userMutedRef = useRef(false);
 
   // A trilha de áudio pode chegar junto com o vídeo ou depois (renegociação
   // do WebRTC). O pai re-renderiza quando o mapa de fluxos muda, então
@@ -35,37 +39,68 @@ export function RemoteVideo({
     const handlePlay = (): void => setHasFrames(true);
     element.addEventListener("playing", handlePlay);
 
-    // `play()` pode rejeitar se o autoplay for barrado; tentamos de novo após
-    // qualquer interação do usuário com a página.
-    void element.play().catch(() => {
-      const retry = (): void => {
+    /** Toca com som; se a política barrar, cai para mudo sem parar o vídeo. */
+    const playWithSound = (): void => {
+      element.muted = false;
+      setMuted(false);
+      void element.play().catch(() => {
+        element.muted = true;
+        setMuted(true);
         void element.play().catch(() => undefined);
-      };
-      window.addEventListener("pointerdown", retry, { once: true });
-      window.addEventListener("keydown", retry, { once: true });
-    });
+      });
+    };
+
+    playWithSound();
+
+    // Se o autoplay com som for barrado, a primeira interação com a página
+    // libera a política — reativamos o som sozinhos, salvo se o usuário
+    // tiver silenciado de propósito.
+    const retry = (): void => {
+      if (userMutedRef.current) {
+        void element.play().catch(() => undefined);
+        return;
+      }
+      if (element.muted) playWithSound();
+    };
+    window.addEventListener("pointerdown", retry);
+    window.addEventListener("keydown", retry);
 
     return () => {
       element.removeEventListener("playing", handlePlay);
+      window.removeEventListener("pointerdown", retry);
+      window.removeEventListener("keydown", retry);
       element.srcObject = null;
     };
   }, [stream]);
 
-  // O React não reflete mudanças na propriedade `muted` de forma confiável,
-  // então sincronizamos o estado manualmente (o `muted` do JSX cuida do
+  // O React não reflete mudanças nas propriedades `muted`/`volume` de forma
+  // confiável, então sincronizamos manualmente (o `muted` do JSX cuida do
   // valor inicial, antes de qualquer autoplay).
   useEffect(() => {
     if (videoRef.current) videoRef.current.muted = muted;
   }, [muted]);
 
-  /** Liga/desliga o som — o clique fornece a interação exigida pelo autoplay. */
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.volume = volume / 100;
+  }, [volume]);
+
+  /** Liga/desliga o som. O clique fornece a interação exigida pela política. */
   const toggleSound = (): void => {
     const element = videoRef.current;
     if (!element) return;
-    const next = !muted;
-    element.muted = next;
-    setMuted(next);
-    if (!next) void element.play().catch(() => undefined);
+
+    if (!muted) {
+      // Silencia sem perder o volume escolhido.
+      userMutedRef.current = true;
+      element.muted = true;
+      setMuted(true);
+      return;
+    }
+
+    userMutedRef.current = false;
+    element.muted = false;
+    setMuted(false);
+    void element.play().catch(() => undefined);
   };
 
   return (
@@ -93,20 +128,34 @@ export function RemoteVideo({
         {label}
       </span>
 
-      {/* Controle de som — só existe quando a transmissão tem áudio. */}
+      {/* Controles de som — só existem quando a transmissão tem áudio. */}
       {hasAudio && (
-        <button
-          type="button"
-          onClick={toggleSound}
-          aria-pressed={!muted}
-          aria-label={
-            muted ? `Ativar som de ${label}` : `Desativar som de ${label}`
-          }
-          title={muted ? "Ativar som" : "Desativar som"}
-          className="absolute bottom-3 right-3 z-10 rounded-lg border border-white/10 bg-base-950/70 px-2.5 py-1.5 text-xs font-medium text-ink-200 backdrop-blur transition-colors hover:bg-base-800 hover:text-ink-50"
-        >
-          {muted ? "🔇 Ativar som" : "🔊 Desativar som"}
-        </button>
+        <div className="absolute bottom-3 right-3 z-10 flex items-center gap-2 rounded-lg border border-white/10 bg-base-950/70 px-2 py-1.5 backdrop-blur">
+          <button
+            type="button"
+            onClick={toggleSound}
+            aria-pressed={!muted}
+            aria-label={
+              muted ? `Ativar som de ${label}` : `Desativar som de ${label}`
+            }
+            title={muted ? "Ativar som" : "Desativar som"}
+            className="rounded p-0.5 text-ink-200 transition-colors hover:text-ink-50"
+          >
+            {muted ? "🔇" : "🔊"}
+          </button>
+
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={volume}
+            onChange={(event) => setVolume(Number(event.target.value))}
+            aria-label={`Volume de ${label}`}
+            title={`Volume: ${volume}%`}
+            className="volume-slider"
+          />
+        </div>
       )}
     </div>
   );

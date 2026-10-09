@@ -148,6 +148,59 @@
   }
 }
 
+/* Tela cheia do palco de vídeo.
+   O navegador só garante que o elemento ocupe a tela; bordas, cantos e
+   proporção continuam sendo nossos. Como `:fullscreen` é aplicado pelo
+   próprio navegador — e não pelo estado do React — o layout nunca fica
+   "preso" se o JavaScript perder um evento de entrada/saída.
+   Estas regras ficam fora de @layer de propósito: utilities do Tailwind
+   (camada `utilities`) venceriam uma regra em `components` por ordem de
+   camada, e não por especificidade. */
+.stage:fullscreen {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Em tela cheia o vídeo COBRE a tela inteira, sem barras pretas. Se a
+   origem compartilhada tiver proporção bem diferente da tela, algumas
+   bordas são aparadas — no modo normal segue `object-contain` (nada
+   cortado). */
+.stage:fullscreen video {
+  object-fit: cover;
+}
+
+/* Regulador de volume do controle de som (fora de @layer pelas mesmas
+   razões da regra acima). */
+.volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 84px;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--color-base-600);
+  cursor: pointer;
+}
+
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--color-accent-400);
+}
+
+.volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--color-accent-400);
+}
+
 /* Estiliza a barra de rolagem de forma discreta no tema escuro. */
 * {
   scrollbar-width: thin;
